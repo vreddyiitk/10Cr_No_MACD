@@ -4,12 +4,9 @@ nse_pipeline.py  /  MC_10Cr_Above_D.py
 STEP 1 — Download live "Stocks Traded" data from NSE India
 STEP 2 — Filter EQ-series stocks where Value > ₹10 Crores
 STEP 3 — Download 200 daily bars from yfinance and save
-          TradingView-style dark-theme PNG charts
+          white-background PNG charts
 
-  • EMA9 on Weekly close — plotted on the daily chart (purple dashed line)
-  • EMA9 on Monthly close — plotted on the daily chart (cyan dotted line)
-  Both are computed on their native timeframe and forward-filled onto the
-  daily bar index so they step-hold correctly between HTF closes.
+  • EMA9 on Daily close
 
 Requirements:
     pip install selenium webdriver-manager yfinance pandas openpyxl matplotlib
@@ -87,27 +84,25 @@ CANDLE_BODY_WIDTH = 0.75
 CANDLE_WICK_WIDTH = 0.12
 MAX_BARS          = 200          # chart shows last 200 bars
 
-# ── HTF EMA9 overlay settings ────────────────────────────────
-WEEKLY_LOOKBACK_DAYS  = 730    # ~2 years to warm up weekly EMA9
-MONTHLY_LOOKBACK_DAYS = 3650   # ~10 years to warm up monthly EMA9
-WEEKLY_EMA_COLOR      = "#E040FB"   # bright purple  (dashed)
-MONTHLY_EMA_COLOR     = "#00E5FF"   # bright cyan    (dotted)
+WEEKLY_LOOKBACK_DAYS = 730  # ~2 years to warm up weekly EMA9
+MONTHLY_LOOKBACK_DAYS = 3650  # ~10 years to warm up monthly EMA9
+WEEKLY_EMA_COLOR = "#E040FB"  # bright purple  (dashed)
+MONTHLY_EMA_COLOR = "#00E5FF"  # bright cyan    (dotted)
 
 STYLE = {
-    "bg":          "#131722",
-    "panel_bg":    "#1E222D",
-    "grid":        "#2A2E39",
-    "up_candle":   "#26A69A",
+    "bg": "#131722",
+    "panel_bg": "#1E222D",
+    "grid": "#2A2E39",
+    "up_candle": "#26A69A",
     "down_candle": "#EF5350",
-    "wick_up":     "#26A69A",
-    "wick_down":   "#EF5350",
-    "ema_color":   "#FF9800",
-    "text":        "#D1D4DC",
-    "subtext":     "#787B86",
-    "border":      "#2A2E39",
-    "recent_low":  "#FFD700",
+    "wick_up": "#26A69A",
+    "wick_down": "#EF5350",
+    "ema_color": "#FF9800",
+    "text": "#D1D4DC",
+    "subtext": "#787B86",
+    "border": "#2A2E39",
+    "recent_low": "#FFD700",
 }
-
 SYNC_XHR = """
 var xhr = new XMLHttpRequest();
 xhr.open('GET', arguments[0], false);
@@ -507,65 +502,15 @@ def ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
 
-def fetch_htf_ema9(ticker: str, daily_index: pd.DatetimeIndex):
-    """
-    Download weekly and monthly OHLC, compute EMA9 on each timeframe's
-    close, then forward-fill onto the daily index.
-    """
-    end_dt = datetime.datetime.today() + timedelta(days=1)
-
-    def _download_close(interval, lookback_days):
-        start_dt = end_dt - timedelta(days=lookback_days)
-        try:
-            df = yf.download(
-                ticker,
-                start=start_dt.strftime("%Y-%m-%d"),
-                end=end_dt.strftime("%Y-%m-%d"),
-                interval=interval,
-                auto_adjust=True,
-                progress=False,
-            )
-            if df is None or df.empty:
-                return pd.Series(dtype=float)
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            close = df["Close"].dropna()
-            close.index = pd.to_datetime(close.index).tz_localize(None)
-            return close
-        except Exception:
-            return pd.Series(dtype=float)
-
-    weekly_close  = _download_close("1wk", WEEKLY_LOOKBACK_DAYS)
-    monthly_close = _download_close("1mo", MONTHLY_LOOKBACK_DAYS)
-
-    weekly_ema9  = ema(weekly_close,  EMA_PERIOD) if not weekly_close.empty \
-                   else pd.Series(dtype=float)
-    monthly_ema9 = ema(monthly_close, EMA_PERIOD) if not monthly_close.empty \
-                   else pd.Series(dtype=float)
-
-    def _ffill_onto_daily(htf_series: pd.Series) -> pd.Series:
-        if htf_series.empty:
-            return pd.Series(np.nan, index=daily_index)
-        merged_idx = htf_series.index.union(daily_index).sort_values()
-        filled     = htf_series.reindex(merged_idx).ffill()
-        return filled.reindex(daily_index)
-
-    return _ffill_onto_daily(weekly_ema9), _ffill_onto_daily(monthly_ema9)
-
-
 # ═══════════════════════════════════════════════════════════════
 #  STEP 3 — CHART
 # ═══════════════════════════════════════════════════════════════
 
 def plot_chart(symbol: str, ohlc: pd.DataFrame,
-               tv_cr: float, output_path: str,
-               weekly_ema9: pd.Series = None,
-               monthly_ema9: pd.Series = None):
+               tv_cr: float, output_path: str):
     """
-    Render a TradingView-style dark chart with:
+    Render a white-background chart with:
       • Candlesticks + EMA9 (daily)
-      • EMA9 on weekly close  — purple dashed line
-      • EMA9 on monthly close — cyan dotted line
       • 20-bar recent-low dashed annotation
     """
     s  = STYLE
@@ -589,7 +534,7 @@ def plot_chart(symbol: str, ohlc: pd.DataFrame,
     ax1.tick_params(colors=s["subtext"], labelsize=8)
     for spine in ax1.spines.values():
         spine.set_edgecolor(s["border"])
-    ax1.grid(True, color=s["grid"], linewidth=0.4, alpha=0.6)
+    ax1.grid(True, color=s["grid"], linewidth=0.4, alpha=0.8)
 
     # ── Candlesticks ──────────────────────────────────────────────────────────
     for i, (_, row) in enumerate(ohlc.iterrows()):
@@ -603,28 +548,6 @@ def plot_chart(symbol: str, ohlc: pd.DataFrame,
     # ── Daily EMA9 ────────────────────────────────────────────────────────────
     ax1.plot(xs, ema9.values, color=s["ema_color"],
              linewidth=1.6, label=f"EMA {EMA_PERIOD} (Daily)", zorder=4)
-
-    # ── Weekly EMA9 forward-filled onto daily bars ────────────────────────────
-    if weekly_ema9 is not None and not weekly_ema9.isna().all():
-        w_vals = weekly_ema9.reindex(ohlc.index, method="ffill").values
-        ax1.plot(xs, w_vals,
-                 color=WEEKLY_EMA_COLOR,
-                 linewidth=1.5,
-                 linestyle="--",
-                 label=f"EMA {EMA_PERIOD} (Weekly)",
-                 zorder=5,
-                 alpha=0.90)
-
-    # ── Monthly EMA9 forward-filled onto daily bars ───────────────────────────
-    if monthly_ema9 is not None and not monthly_ema9.isna().all():
-        m_vals = monthly_ema9.reindex(ohlc.index, method="ffill").values
-        ax1.plot(xs, m_vals,
-                 color=MONTHLY_EMA_COLOR,
-                 linewidth=1.5,
-                 linestyle=":",
-                 label=f"EMA {EMA_PERIOD} (Monthly)",
-                 zorder=5,
-                 alpha=0.90)
 
     # ── Recent-low dashed line ────────────────────────────────────────────────
     ax1.hlines(recent_low_price, n - lookback, n - 0.5,
@@ -654,17 +577,13 @@ def plot_chart(symbol: str, ohlc: pd.DataFrame,
     leg = [
         mpatches.Patch(facecolor=s["up_candle"],   label="Bullish"),
         mpatches.Patch(facecolor=s["down_candle"], label="Bearish"),
-        Line2D([0], [0], color=s["ema_color"],      linewidth=1.8,
+        Line2D([0], [0], color=s["ema_color"],  linewidth=1.8,
                linestyle="-",  label=f"EMA {EMA_PERIOD} (Daily)"),
-        Line2D([0], [0], color=WEEKLY_EMA_COLOR,    linewidth=1.5,
-               linestyle="--", label=f"EMA {EMA_PERIOD} (Weekly)"),
-        Line2D([0], [0], color=MONTHLY_EMA_COLOR,   linewidth=1.5,
-               linestyle=":",  label=f"EMA {EMA_PERIOD} (Monthly)"),
-        Line2D([0], [0], color=s["recent_low"],     linewidth=1.2,
+        Line2D([0], [0], color=s["recent_low"], linewidth=1.2,
                linestyle="--", label=f"{RECENT_LOW_BARS}-bar Low"),
     ]
     ax1.legend(handles=leg, loc="upper left", fontsize=7.5,
-               framealpha=0.6, facecolor=s["bg"],
+               framealpha=0.8, facecolor=s["bg"],
                edgecolor=s["border"], labelcolor=s["text"])
 
     # ── Right-axis price pills ────────────────────────────────────────────────
@@ -672,17 +591,6 @@ def plot_chart(symbol: str, ohlc: pd.DataFrame,
     le = ema9.iloc[-1]
     cc = s["up_candle"] if lc >= ohlc["Open"].iloc[-1] else s["down_candle"]
     pills = [(lc, cc, f"₹{lc:,.2f}"), (le, s["ema_color"], f"₹{le:,.2f}")]
-
-    if weekly_ema9 is not None:
-        wv = weekly_ema9.reindex(ohlc.index, method="ffill")
-        if not wv.isna().all():
-            pills.append((wv.iloc[-1], WEEKLY_EMA_COLOR,
-                          f"W {wv.iloc[-1]:,.2f}"))
-    if monthly_ema9 is not None:
-        mv = monthly_ema9.reindex(ohlc.index, method="ffill")
-        if not mv.isna().all():
-            pills.append((mv.iloc[-1], MONTHLY_EMA_COLOR,
-                          f"M {mv.iloc[-1]:,.2f}"))
 
     for val, col, lbl in pills:
         ax1.annotate(lbl,
@@ -716,7 +624,7 @@ def plot_chart(symbol: str, ohlc: pd.DataFrame,
     fig.text(0.96, 0.955, f"Latest Close: {date}",
              color=s["text"], fontsize=9, ha="right", fontweight="bold")
     fig.text(0.96, 0.935,
-             f"EMA {EMA_PERIOD} Daily/Weekly/Monthly  |  Bars: {n}",
+             f"EMA {EMA_PERIOD} Daily  |  Bars: {n}",
              color=s["subtext"], fontsize=8, ha="right")
 
     plt.savefig(output_path, dpi=150, bbox_inches="tight",
@@ -764,13 +672,8 @@ def generate_charts(filtered_df: pd.DataFrame):
             ohlc.index = pd.to_datetime(ohlc.index).tz_localize(None)
             ohlc = ohlc.tail(MAX_BARS)   # ← use last 200 bars
 
-            # ── Weekly + Monthly EMA9 (forward-filled onto daily index) ───────
-            w_ema9, m_ema9 = fetch_htf_ema9(ticker, ohlc.index)
-
             out = os.path.join(OUTPUT_DIR, f"{sym}.png")
-            plot_chart(sym, ohlc, tv_cr, out,
-                       weekly_ema9=w_ema9,
-                       monthly_ema9=m_ema9)
+            plot_chart(sym, ohlc, tv_cr, out)
             print(f"✔  {len(ohlc)} bars  →  {out}")
             success.append(sym)
 
@@ -806,7 +709,7 @@ def main():
     print(f"  NSE Pipeline  —  {run_time}")
     print(f"  Step 1 : Download NSE Stocks Traded")
     print(f"  Step 2 : Filter  Value > ₹{TRADED_VALUE_MIN_CR} Cr  (EQ series)")
-    print(f"  Step 3 : Charts  ({MAX_BARS} bars | Daily + Weekly EMA9 + Monthly EMA9)  →  {OUTPUT_DIR}/")
+    print(f"  Step 3 : Charts  ({MAX_BARS} bars | Daily EMA9)  →  {OUTPUT_DIR}/")
     print(f"{'═'*65}")
 
     # STEP 1
